@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+*.db
+# Node
+node_modules/
+# frontend/dist IS committed on purpose, so the app runs without Node.js
+# Secrets
+.env
+.env.*
+!.env.example
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

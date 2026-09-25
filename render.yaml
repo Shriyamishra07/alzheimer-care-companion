@@ -1,10 +1,11 @@
 # Render Blueprint: New > Blueprint > pick this repo. Free plan sleeps after 15 min idle.
-services:
-  - type: web
-    name: care-companion
-    runtime: docker
-    plan: free
-    healthCheckPath: /api/health
+   services:
+     - type: web
+       name: care-companion
+       runtime: docker
+       plan: free
+       region: singapore
+       healthCheckPath: /api/health
     envVars:
       - key: DATABASE_URL        # Neon connection string (postgresql://...?sslmode=require)
         sync: false

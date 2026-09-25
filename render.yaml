@@ -1,19 +1,18 @@
-# Render Blueprint: New > Blueprint > pick this repo. Free plan sleeps after 15 min idle.
-   services:
-     - type: web
-       name: care-companion
-       runtime: docker
-       plan: free
-       region: singapore
-       healthCheckPath: /api/health
+services:
+  - type: web
+    name: care-companion
+    runtime: docker
+    plan: free
+    region: singapore
+    healthCheckPath: /api/health
     envVars:
-      - key: DATABASE_URL        # Neon connection string (postgresql://...?sslmode=require)
+      - key: DATABASE_URL
         sync: false
-      - key: SECRET_KEY          # signs sign-in tokens and photo links
+      - key: SECRET_KEY
         generateValue: true
-      - key: GEMINI_API_KEY      # from Google AI Studio; leave empty to run in offline mode
+      - key: GEMINI_API_KEY
         sync: false
       - key: LLM_PROVIDER
         value: auto
-      - key: DEMO_SEED           # creates the Suresh / Anita demo accounts on an empty database
+      - key: DEMO_SEED
         value: "1"

@@ -163,6 +163,14 @@ function Checked({ res }) {
         <p>Memories looked at: {res.retrieved.length}. Sentences removed by the checker: {res.dropped.length}.</p>
         {res.dropped.map((d, i) => <p key={i}>Removed: “{d.sentence}” ({d.reason.replace(/_/g, " ")})</p>)}
         <p>Answered by: {res.provider}. Time: {res.latency_ms} ms.</p>
+        {res.ai_payload ? (
+          <>
+            <p><b>Privacy:</b> names, places and numbers were replaced with codes before anything was sent to the AI.</p>
+            <details><summary style={{ cursor: "pointer" }}>Show exactly what the AI received</summary>
+              <pre className="ai-sent">{res.ai_payload.filter((x) => x.sent).map((x) => `[${x.step}] ${x.sent}`).join("\n\n")}</pre>
+            </details>
+          </>
+        ) : <p><b>Privacy:</b> answered on this server. Nothing was sent to an outside AI.</p>}
       </div>
     </details>
   );

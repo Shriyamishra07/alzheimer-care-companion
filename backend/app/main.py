@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import settings
 from .db import Base, SessionLocal, engine
+from .migrate import migrate
 from .routers import ask, auth, care, memories
 from .services.seed import seed_demo
 
@@ -25,6 +26,9 @@ web_app_found = os.path.isfile(os.path.join(static_dir, "index.html")) and os.pa
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     Base.metadata.create_all(engine)
+    added = migrate(engine)
+    if added:
+        print(f"INFO:     Database upgraded: added {', '.join(added)}")
     if settings.DEMO_SEED:
         db = SessionLocal()
         try:
@@ -45,7 +49,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Alzheimer Care Companion API", version="0.6.0", lifespan=lifespan)
+app = FastAPI(title="Alzheimer Care Companion API", version="0.7.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.CORS_ORIGINS, allow_methods=["*"], allow_headers=["*"])
 
 for r in (auth.router, memories.router, ask.router, care.router):

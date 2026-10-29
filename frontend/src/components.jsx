@@ -5,11 +5,12 @@ import "leaflet/dist/leaflet.css";
 import {
   House, MapPin, Plus, MessageCircleQuestion, Menu, BookOpen, Users, Bell, HeartHandshake, ShieldCheck,
   FlaskConical, Settings, LayoutDashboard, Link2, Siren, Camera, Mic, PenLine, ClipboardCheck, Lock, X, Phone,
-  MessageSquareHeart, ChevronDown, LogOut,
+  MessageSquareHeart, ChevronDown, LogOut, UsersRound,
 } from "lucide-react";
 import { api, mediaUrl } from "./api";
 import { useAuth } from "./auth";
 import { fmtTime, fmtWhen, getDemoLocation } from "./hooks";
+import { ReminderAlerts } from "./reminders";
 
 // One list drives the desktop header, the phone bottom bar and the More page.
 export const PATIENT_NAV = [
@@ -20,8 +21,8 @@ export const PATIENT_NAV = [
   { to: "/memories", label: "Memories", icon: BookOpen, top: true, group: "My life" },
   { to: "/people", label: "People", icon: Users, top: true, group: "My life" },
   { to: "/reminders", label: "Reminders", icon: Bell, top: true, group: "My life" },
-  { to: "/family", label: "Family access", icon: HeartHandshake, group: "Family and privacy" },
-  { to: "/privacy", label: "Who saw my data", icon: ShieldCheck, group: "Family and privacy" },
+  { to: "/family", label: "Family and care team", icon: HeartHandshake, group: "Family and privacy" },
+  { to: "/privacy", label: "Privacy and AI", icon: ShieldCheck, group: "Family and privacy" },
   { to: "/research", label: "Grounding test", icon: FlaskConical, group: "About this project" },
   { to: "/settings", label: "Settings", icon: Settings, group: "About this project" },
 ];
@@ -30,7 +31,8 @@ const PATIENT_BOTTOM = ["/", "/places", "/save", "/ask"].map((to) => PATIENT_NAV
 
 export const CARER_NAV = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true, top: true, bottom: true },
-  { to: "/link", label: "Link a person", icon: Link2, top: true, bottom: true },
+  { to: "/team", label: "Care team", icon: UsersRound, top: true, bottom: true },
+  { to: "/link", label: "Link a person", short: "Link", icon: Link2, top: true, bottom: true },
   { to: "/settings", label: "Settings", icon: Settings, top: true, bottom: true },
 ];
 
@@ -89,6 +91,7 @@ export function Shell({ children }) {
   const bottom = patient ? [...PATIENT_BOTTOM, MORE_LINK] : CARER_NAV;
   return (
     <div className="shell">
+      {patient && <ReminderAlerts name={user.name} />}
       <header className="topbar">
         <div className="topbar-in">
           <Link to="/" className="brand"><img src="/icon-192.png" alt="" /><span>Care Companion</span></Link>

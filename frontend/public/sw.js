@@ -1,6 +1,6 @@
 // Service worker: makes the app installable and lets it open with no network.
 // API calls are never cached - memories always come from the server.
-const CACHE = "care-companion-v1";
+const CACHE = "care-companion-v2";
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(["/", "/manifest.webmanifest", "/icon.svg"])));
   self.skipWaiting();
@@ -21,4 +21,13 @@ self.addEventListener("fetch", (e) => {
     if (r.ok) { const copy = r.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); }
     return r;
   })));
+});
+
+// Tapping a reminder notification brings the app to the front.
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+    const open = list.find((c) => "focus" in c);
+    return open ? open.focus() : self.clients.openWindow("/");
+  }));
 });

@@ -7,6 +7,11 @@ the tests working when there is no internet or the free API quota runs out.
 GeminiProvider uses Google's Gemini API (free tier via AI Studio) for semantic
 embeddings, fluent answers, a second verification pass, voice transcription and
 photo captions. The client app never sees the key: only this backend calls it.
+
+Privacy: every piece of text sent to Gemini passes through a Redactor first, so
+names, places, phone numbers and ID numbers arrive as tokens (PERSON_12,
+PLACE_3, PHONE_8f2a). Real values are put back only on this server. Each
+request is recorded, already redacted, in `trace` for the audit log.
 """
 import base64
 import json
@@ -32,16 +37,16 @@ class OfflineProvider:
     relative = 0.80
     verifier = None
 
-    def embed_docs(self, texts):
-        return [hashed_embedding(t) for t in texts]
+    def embed_docs(self, texts, redactor=None):
+        return [hashed_embedding(t) for t in texts]       # local: nothing leaves the server
 
-    def embed_query(self, text):
+    def embed_query(self, text, redactor=None):
         return hashed_embedding(text)
 
     def similarity(self, a, b):
         return sparse_cosine(a, b)
 
-    def generate_claims(self, question, items, max_items=3):
+    def generate_claims(self, question, items, max_items=3, redactor=None, trace=None):
         """Quote the best memories. Nothing is paraphrased, so nothing can be invented."""
         claims = []
         for it in items[:max_items]:
@@ -65,10 +70,13 @@ Rules:
 - Talk to the person as "you". Use short, simple sentences. At most 3 sentences.
 - Every sentence must list the ids of the memories that support it.
 - If the memories do not answer the question, set answer_found to false and return no claims.
+- Names, places and numbers are replaced by tokens such as PERSON_12, PLACE_3 or PHONE_8f2a.
+  Copy tokens exactly as written. Never guess what a token stands for.
 Return JSON only: {"answer_found": true|false, "claims": [{"sentence": "...", "record_ids": [1, 2]}]}"""
 
 VERIFY_PROMPT = """For each item, answer whether the SENTENCE is fully supported by the MEMORIES text
-(every fact in the sentence must be stated in the memories). Return JSON only:
+(every fact in the sentence must be stated in the memories). Tokens such as PERSON_12 stand for hidden names.
+Return JSON only:
 {"verdicts": [true, false, ...]} in the same order as the items."""
 
 
@@ -82,7 +90,7 @@ class GeminiProvider:
         self.embed_model = settings.GEMINI_EMBED_MODEL
         self.min_score = settings.GEMINI_MIN_SCORE
         self.name = f"gemini:{self.model}"
-        self.embed_name = f"gemini:{self.embed_model}:768"
+        self.embed_name = f"gemini:{self.embed_model}:768:redacted-v1"   # vectors of redacted text only
         self.client = httpx.Client(timeout=25.0, headers={"x-goog-api-key": key})
 
     def _post(self, path: str, body: dict) -> dict:
@@ -123,19 +131,22 @@ class GeminiProvider:
             raise ProviderError("embedding count mismatch")
         return out
 
-    def embed_docs(self, texts):
-        return self._embed(texts, "RETRIEVAL_DOCUMENT")
+    def embed_docs(self, texts, redactor=None):
+        return self._embed([redactor.redact(t) if redactor else t for t in texts], "RETRIEVAL_DOCUMENT")
 
-    def embed_query(self, text):
-        return self._embed([text], "RETRIEVAL_QUERY")[0]
+    def embed_query(self, text, redactor=None):
+        return self._embed([redactor.redact(text) if redactor else text], "RETRIEVAL_QUERY")[0]
 
     def similarity(self, a, b):
         return dense_cosine(a, b)
 
-    def generate_claims(self, question, items, max_items=6):
-        memories = [{"id": it["id"], "when": it["when"], "place": it.get("place") or "",
-                     "people": it.get("people", []), "memory": it["memory"]} for it in items]
-        prompt = f"QUESTION: {question}\n\nMEMORIES:\n{json.dumps(memories, ensure_ascii=False)}"
+    def generate_claims(self, question, items, max_items=6, redactor=None, trace=None):
+        r = redactor.redact if redactor else (lambda t: t)
+        memories = [{"id": it["id"], "when": it["when"], "place": r(it.get("place") or ""),
+                     "people": [r(p) for p in it.get("people", [])], "memory": r(it["memory"])} for it in items]
+        prompt = f"QUESTION: {r(question)}\n\nMEMORIES:\n{json.dumps(memories, ensure_ascii=False)}"
+        if trace is not None:
+            trace.append({"step": "answer", "sent": prompt})
         try:
             data = self._json(self._generate(SYSTEM_PROMPT, [{"text": prompt}]))
         except json.JSONDecodeError as e:
@@ -145,12 +156,17 @@ class GeminiProvider:
         claims = []
         for c in data.get("claims", []):
             ids = [int(i) for i in c.get("record_ids", []) if str(i).isdigit()]
-            claims.append(Claim(sentence=str(c.get("sentence", "")).strip(), record_ids=ids))
+            sentence = str(c.get("sentence", "")).strip()
+            claims.append(Claim(sentence=redactor.restore(sentence) if redactor else sentence, record_ids=ids))
         return claims
 
-    def verifier(self, pairs):
-        items = [{"sentence": s, "memories": texts} for s, texts in pairs]
-        data = self._json(self._generate(VERIFY_PROMPT, [{"text": json.dumps(items, ensure_ascii=False)}]))
+    def verifier(self, pairs, redactor=None, trace=None):
+        r = redactor.redact if redactor else (lambda t: t)
+        items = [{"sentence": r(s), "memories": [r(t) for t in texts]} for s, texts in pairs]
+        sent = json.dumps(items, ensure_ascii=False)
+        if trace is not None:
+            trace.append({"step": "verify", "sent": sent})
+        data = self._json(self._generate(VERIFY_PROMPT, [{"text": sent}]))
         verdicts = [bool(v) for v in data.get("verdicts", [])]
         return verdicts if len(verdicts) == len(pairs) else [True] * len(pairs)
 

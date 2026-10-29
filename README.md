@@ -1,5 +1,7 @@
 # Alzheimer Care Companion
 
+> **Updated after Review II (version 0.7):** redesigned sign-in, primary caregiver with per-caregiver permissions, voice reminders, and names and numbers hidden from the AI. See [CHANGES.md](CHANGES.md) for what changed and how to demo it.
+
 BE project, Group A4, Department of Computer Engineering, Terna Engineering College, Nerul. A.Y. 2026–27.
 Guide: Dr. R. V. Shahabade.
 

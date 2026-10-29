@@ -72,7 +72,9 @@ RECORDS = [
     ("p03", 19, "14:00", "home", "text", "The bank locker key is inside the steel cupboard, top shelf, under the towels.", [], True),
 ]
 
-REMINDERS = [("Morning tablet", "09:00"), ("Drink a glass of water", "12:00"), ("Evening walk", "17:30")]
+REMINDERS = [("Morning tablet", "09:00", "medication", "The blood pressure tablet, after breakfast."),
+             ("Drink a glass of water", "12:00", "activity", ""),
+             ("Evening walk", "17:30", "activity", "A short walk around the building.")]
 
 
 def _at(now_utc: datetime, days_ago: int, hhmm: str, tz: int, idx: int) -> datetime:
@@ -137,8 +139,8 @@ def seed_persona(db: Session, email: str, name: str = "Suresh Patil", is_system:
         place.last_visit_at = max(place.last_visit_at, when)
         keymap[key] = rec.id
 
-    for title, hhmm in REMINDERS:
-        rem = Reminder(user_id=patient.id, title=title, time_hhmm=hhmm, created_by=patient.id)
+    for title, hhmm, kind, note in REMINDERS:
+        rem = Reminder(user_id=patient.id, title=title, time_hhmm=hhmm, kind=kind, note=note, created_by=patient.id)
         db.add(rem)
         db.flush()
         if title == "Morning tablet":
@@ -151,16 +153,56 @@ def seed_persona(db: Session, email: str, name: str = "Suresh Patil", is_system:
 
 def seed_demo(db: Session):
     """Demo accounts shown on the sign-in screen. Created once, on an empty database."""
-    if db.query(User).filter(User.is_system.is_(False)).count() > 0:
+    if db.query(User).filter(User.is_system.is_(False)).count() == 0:
+        patient, _ = seed_persona(db, "suresh@demo.in")
+        anita = User(name="Anita Patil", email="anita@demo.in", password_hash=hash_password("demo1234"),
+                     role="caregiver", phone="+91 98200 00000")
+        db.add(anita)
+        db.flush()
+        db.add(CareLink(patient_id=patient.id, caregiver_id=anita.id, role="primary", relation="Daughter",
+                        created_at=datetime.utcnow() - timedelta(days=30)))
+        db.add(AccessLog(patient_id=patient.id, actor_id=anita.id, action="view_dashboard", detail="Opened the dashboard",
+                         created_at=datetime.utcnow() - timedelta(hours=20)))
+        db.add(AccessLog(patient_id=patient.id, actor_id=anita.id, action="view_memories", detail="Looked at memories",
+                         created_at=datetime.utcnow() - timedelta(hours=19)))
+        db.commit()
+    demo_extras(db)
+
+
+def demo_extras(db: Session):
+    """Features added after Review II, also added to demo databases that already exist. Safe to repeat."""
+    patient = db.query(User).filter(User.email == "suresh@demo.in").first()
+    anita = db.query(User).filter(User.email == "anita@demo.in").first()
+    if not patient or not anita:
         return
-    patient, _ = seed_persona(db, "suresh@demo.in")
-    anita = User(name="Anita Patil", email="anita@demo.in", password_hash=hash_password("demo1234"),
-                 role="caregiver", phone="+91 98200 00000")
-    db.add(anita)
-    db.flush()
-    db.add(CareLink(patient_id=patient.id, caregiver_id=anita.id, created_at=datetime.utcnow() - timedelta(days=30)))
-    db.add(AccessLog(patient_id=patient.id, actor_id=anita.id, action="view_dashboard", detail="Opened the dashboard",
-                     created_at=datetime.utcnow() - timedelta(hours=20)))
-    db.add(AccessLog(patient_id=patient.id, actor_id=anita.id, action="view_memories", detail="Looked at memories",
-                     created_at=datetime.utcnow() - timedelta(hours=19)))
+    anita_link = (db.query(CareLink).filter(CareLink.patient_id == patient.id, CareLink.caregiver_id == anita.id,
+                                            CareLink.revoked_at.is_(None)).first())
+    if anita_link and not anita_link.relation:
+        anita_link.relation = "Daughter"
+    # A second caregiver with limited access, to show the primary caregiver's controls.
+    rohan = db.query(User).filter(User.email == "rohan@demo.in").first()
+    if not rohan:
+        rohan = User(name="Rohan Patil", email="rohan@demo.in", password_hash=hash_password("demo1234"),
+                     role="caregiver", phone="+91 98200 11111")
+        db.add(rohan)
+        db.flush()
+        db.add(CareLink(patient_id=patient.id, caregiver_id=rohan.id, role="secondary", relation="Nephew",
+                        invited_by=anita.id, created_at=datetime.utcnow() - timedelta(days=12),
+                        permissions={"memories": False, "places": False, "reminders": True, "messages": True,
+                                     "add_memories": False, "alerts": True}))
+        db.add(AccessLog(patient_id=patient.id, actor_id=anita.id, action="invited", detail="Invited Rohan (nephew)",
+                         created_at=datetime.utcnow() - timedelta(days=12, hours=1)))
+    # Reminder types and notes for the original demo reminders.
+    for title, _hhmm, kind, note in REMINDERS:
+        r = db.query(Reminder).filter(Reminder.user_id == patient.id, Reminder.title == title).first()
+        if r and (r.kind in (None, "", "other")):
+            r.kind, r.note = kind, r.note or note
+    # An upcoming appointment, a one-time reminder.
+    today_local = (datetime.utcnow() + timedelta(minutes=330)).date()
+    has_appt = db.query(Reminder).filter(Reminder.user_id == patient.id, Reminder.kind == "appointment",
+                                         Reminder.active.is_(True)).all()
+    if not any((r.on_date or "") >= today_local.isoformat() for r in has_appt):
+        db.add(Reminder(user_id=patient.id, title="Check-up with Dr. Kulkarni", time_hhmm="11:00", kind="appointment",
+                        note="Take the blood test report. Anita will come with you.", repeat_mode="once",
+                        on_date=(today_local + timedelta(days=2)).isoformat(), created_by=anita.id))
     db.commit()

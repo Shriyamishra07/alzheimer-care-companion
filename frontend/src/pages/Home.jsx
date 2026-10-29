@@ -5,6 +5,7 @@ import { api, TZ, mediaUrl } from "../api";
 import { useAuth } from "../auth";
 import { Avatar, MemoryItem, Notice, Skeleton } from "../components";
 import { fmtTime, fmtWhenInline, greeting, partOfDay, useApi, useClock, useLocation, setDemoLocation } from "../hooks";
+import { ReminderRow } from "../reminders";
 
 export default function Home() {
   const { user } = useAuth();
@@ -170,8 +171,14 @@ function TodayList() {
 }
 
 function RemindersToday() {
+  const { user } = useAuth();
   const { data, setData, error } = useApi(`/api/reminders?tz=${TZ}`);
   const [busy, setBusy] = useState(null);
+  useEffect(() => {
+    const again = () => api(`/api/reminders?tz=${TZ}`).then(setData).catch(() => {});
+    window.addEventListener("cc:reminders-changed", again);
+    return () => window.removeEventListener("cc:reminders-changed", again);
+  }, [setData]);
   const done = async (id) => {
     setBusy(id);
     try { setData(await api(`/api/reminders/${id}/done?tz=${TZ}`, { method: "POST" })); } finally { setBusy(null); }
@@ -188,17 +195,7 @@ function RemindersToday() {
       {data.length === 0 && <p className="muted">No reminders set.</p>}
       {data.length > 0 && open === 0 && <p className="small muted" style={{ marginBottom: 6 }}>All done for today.</p>}
       <div className="list">
-        {data.map((r) => (
-          <div className="list-item" key={r.id}>
-            <div className="grow">
-              <p><b>{r.title}</b></p>
-              <p className="small muted">{r.time}{r.status === "done" && r.done_at ? `, done at ${fmtTime(r.done_at)}` : ""}</p>
-            </div>
-            {r.status === "done"
-              ? <span className="badge done"><Check size={16} aria-hidden="true" />Done</span>
-              : <button className="btn sm" disabled={busy === r.id} onClick={() => done(r.id)}><Check size={18} aria-hidden="true" />Mark done</button>}
-          </div>
-        ))}
+        {data.map((r) => <ReminderRow key={r.id} r={r} name={user.name} busy={busy} onDone={done} />)}
       </div>
     </section>
   );

@@ -25,10 +25,12 @@ class LoginIn(BaseModel):
 class ProfileIn(BaseModel):
     name: str | None = None
     phone: str | None = None
+    ai_media_consent: bool | None = None
 
 
 def user_out(u: User) -> dict:
-    return {"id": u.id, "name": u.name, "email": u.email, "role": u.role, "phone": u.phone or ""}
+    return {"id": u.id, "name": u.name, "email": u.email, "role": u.role, "phone": u.phone or "",
+            "ai_media_consent": bool(u.ai_media_consent)}
 
 
 @router.post("/auth/register")
@@ -62,5 +64,9 @@ def update_me(body: ProfileIn, user: User = Depends(current_user), db: Session =
         user.name = body.name.strip()
     if body.phone is not None:
         user.phone = body.phone.strip()
+    if body.ai_media_consent is not None:
+        if user.role != "patient":
+            raise HTTPException(403, "Only the person can choose how the AI handles their photos and voice.")
+        user.ai_media_consent = body.ai_media_consent
     db.commit()
     return user_out(user)

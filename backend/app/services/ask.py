@@ -23,15 +23,19 @@ from ..domain.text import content_tokens, focus_coverage_ok, focus_terms, proper
 from ..models import Person, Place, QueryLog, Record, User
 from ..providers.llm import ProviderError, get_offline, get_provider
 from .present import ai_item, iso, record_out
+from .privacy import build_redactor
 
 
-def _vectors(db: Session, provider, records: list[Record], items: dict) -> dict:
+def _vectors(db: Session, provider, records: list[Record], items: dict, redactor=None, trace=None) -> dict:
     """Offline vectors are cheap, computed each time. Model vectors are cached on the row."""
     if provider.name == "offline":
         return {r.id: v for r, v in zip(records, provider.embed_docs([items[r.id]["context"] for r in records]))}
     stale = [r for r in records if r.embed_model != provider.embed_name or not r.embedding]
     if stale:
-        vecs = provider.embed_docs([items[r.id]["context"] for r in stale])
+        if trace is not None:
+            trace.append({"step": "embed", "count": len(stale),
+                          "sent": redactor.redact(items[stale[0].id]["context"]) if redactor else items[stale[0].id]["context"]})
+        vecs = provider.embed_docs([items[r.id]["context"] for r in stale], redactor=redactor)
         for r, v in zip(stale, vecs):
             r.embedding, r.embed_model = v, provider.embed_name
         db.commit()
@@ -39,7 +43,11 @@ def _vectors(db: Session, provider, records: list[Record], items: dict) -> dict:
 
 
 def _run(db: Session, user: User, question: str, tz: int, provider) -> dict:
-    out = {"provider": provider.name, "window": None, "retrieved": [], "draft": [], "accepted": [], "dropped": []}
+    out = {"provider": provider.name, "window": None, "retrieved": [], "draft": [], "accepted": [], "dropped": [],
+           "ai_payload": None}
+    external = provider.name != "offline"
+    redactor = build_redactor(db, user) if external else None
+    trace = [] if external else None
     now = datetime.utcnow()
     window = parse_time_window(question, now, tz)
     q = db.query(Record).filter(Record.user_id == user.id, Record.deleted_at.is_(None), Record.is_private.is_(False))
@@ -71,14 +79,16 @@ def _run(db: Session, user: User, question: str, tz: int, provider) -> dict:
         ordered = sorted(records, key=lambda r: r.created_at)[-6:]
         top_items = [items[r.id] for r in ordered]
         out["retrieved"] = [{"id": it["id"], "score": 1.0} for it in top_items]
-        claims = provider.generate_claims(question, top_items, max_items=6)
-        return _guarded(out, provider, claims, top_items)
+        claims = provider.generate_claims(question, top_items, max_items=6, redactor=redactor, trace=trace)
+        return _guarded(out, provider, claims, top_items, redactor, trace)
 
     place_hits = {p.id for p in places if set(content_tokens(p.name)) & focus}
     person_hits = {p.id for p in people if set(content_tokens(p.name)) & focus}
 
-    qvec = provider.embed_query(question)
-    vecs = _vectors(db, provider, records, items)
+    qvec = provider.embed_query(question, redactor=redactor)
+    if trace is not None:
+        trace.append({"step": "question", "sent": redactor.redact(question)})
+    vecs = _vectors(db, provider, records, items, redactor, trace)
     cands = []
     for r in records:
         toks = set(content_tokens(items[r.id]["context"]))
@@ -97,13 +107,17 @@ def _run(db: Session, user: User, question: str, tz: int, provider) -> dict:
         return {**out, "refused": True, "reason": "no_relevant_memory"}
 
     top_items = [items[c.record_id] for c in top]
-    claims = provider.generate_claims(question, top_items)
-    return _guarded(out, provider, claims, top_items)
+    claims = provider.generate_claims(question, top_items, redactor=redactor, trace=trace)
+    return _guarded(out, provider, claims, top_items, redactor, trace)
 
 
-def _guarded(out: dict, provider, claims, top_items) -> dict:
+def _guarded(out: dict, provider, claims, top_items, redactor=None, trace=None) -> dict:
     out["draft"] = [{"sentence": c.sentence, "record_ids": c.record_ids} for c in claims]
-    guard = GroundingGuard(verifier=provider.verifier)
+    verifier = None
+    if provider.verifier:
+        verifier = (lambda pairs: provider.verifier(pairs, redactor=redactor, trace=trace))
+    guard = GroundingGuard(verifier=verifier)
+    out["ai_payload"] = trace
     result = guard.check(claims, [SourceRecord(it["id"], it["context"], False) for it in top_items])
     out["accepted"] = [{"sentence": c.sentence, "record_ids": c.record_ids} for c in result.accepted]
     out["dropped"] = result.dropped
@@ -139,10 +153,11 @@ def answer_question(db: Session, user: User, question: str, tz: int = 330, sourc
                 cited.append(i)
     rec_map = {r.id: r for r in db.query(Record).filter(Record.id.in_(cited)).all()} if cited else {}
 
+    payload = res.get("ai_payload") or None
     log = QueryLog(user_id=user.id, question=question, provider=res["provider"], time_window=res["window"],
                    retrieved=res["retrieved"], draft=res["draft"], accepted=res["accepted"], dropped=res["dropped"],
                    answer=answer, refused=res["refused"], refusal_reason=res["reason"],
-                   latency_ms=int((time.perf_counter() - t0) * 1000), source=source)
+                   latency_ms=int((time.perf_counter() - t0) * 1000), source=source, ai_payload=payload)
     db.add(log)
     db.commit()
 
@@ -159,4 +174,5 @@ def answer_question(db: Session, user: User, question: str, tz: int = 330, sourc
         "retrieved": res["retrieved"],
         "provider": res["provider"],
         "latency_ms": log.latency_ms,
+        "ai_payload": payload,   # what the external model received, after redaction; None means nothing left the server
     }

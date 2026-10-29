@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../auth";
 import { Notice } from "../components";
+import { AuthCard } from "./Login";
 
 const TARGETS = [
   ["NFR-AI-1", "Every statement traceable to a saved memory", "95% or more"],
@@ -38,24 +39,26 @@ export default function Landing() {
           </nav>
           <div className="site-cta">
             <Link className="btn quiet sm" to="/login">Sign in</Link>
-            <button className="btn accent sm" disabled={busy} onClick={() => demo("suresh@demo.in")}>Try the demo</button>
+            <Link className="btn accent sm" to="/login?mode=register">Get started</Link>
           </div>
         </div>
       </header>
 
       <section className="hero">
-        <div className="wrap in">
-          <div>
-            <h1>Small moments, saved. Given back when they matter.</h1>
+        <div className="wrap in hero-grid">
+          <h1 className="hero-title">Small moments, saved. Given back when they matter.</h1>
+          <div className="hero-auth"><AuthCard /></div>
+          <div className="hero-text">
             <p className="lead">Save a photo, a voice note or a few words. The app adds the time and place. When you are back at that place, or when you ask, the memory is there, in your own words.</p>
-            <div className="ctas">
-              <button className="btn accent lg" disabled={busy} onClick={() => demo("suresh@demo.in")}><UserRound size={22} aria-hidden="true" />{busy ? "Opening…" : "Try it as Suresh"}</button>
-              <button className="btn quiet lg" disabled={busy} onClick={() => demo("anita@demo.in")}><HeartHandshake size={22} aria-hidden="true" />See the family side</button>
+            <div className="trust-chips">
+              <span><ShieldCheck size={18} aria-hidden="true" />Answers only from your memories</span>
+              <span><Users size={18} aria-hidden="true" />Family sees only what you allow</span>
+              <span><Volume2 size={18} aria-hidden="true" />Reminders read aloud</span>
+              <span><Lock size={18} aria-hidden="true" />Names hidden from the AI</span>
             </div>
-            <p className="fine">Works on a phone or a computer, straight from the browser. No app store needed. Demo memories are made up.</p>
+            <p className="fine">Works on a phone or a computer, straight from the browser. No app store needed.</p>
             {err && <div style={{ marginTop: 14 }}><Notice kind="err" onClose={() => setErr(null)}>{err}</Notice></div>}
           </div>
-          <PhoneMockup />
         </div>
       </section>
 
@@ -63,10 +66,13 @@ export default function Landing() {
         <div className="wrap">
           <h2>How it works</h2>
           <p className="intro">Three steps, and the app does the organising in between.</p>
-          <div className="steps">
+          <div className="how-grid">
+            <div className="steps steps-col">
             <div className="step"><div className="n">1</div><h3>Save a moment</h3><p>Tap Save, then take a photo, record a voice note or write a line. The time and place are added for you. Add who was there, if you like.</p></div>
             <div className="step"><div className="n">2</div><h3>It sorts itself</h3><p>Memories are grouped by place, by the people in them and by day, so nothing needs filing and nothing gets lost.</p></div>
             <div className="step"><div className="n">3</div><h3>Get it back</h3><p>Return to a place and the app shows what happened there last time. Or ask a question, out loud or typed, and get an answer built only from your memories.</p></div>
+          </div>
+            <div className="how-phone"><PhoneMockup /></div>
           </div>
         </div>
       </section>

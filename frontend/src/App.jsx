@@ -15,6 +15,7 @@ import { Family, Privacy } from "./pages/Family";
 import Research from "./pages/Research";
 import { Settings, More } from "./pages/Settings";
 import { CarerHome, LinkPerson } from "./pages/Caregiver";
+import CareTeam from "./pages/CareTeam";
 
 // Every new screen starts at the top, like a new page on a website.
 function ScrollToTop() {
@@ -43,6 +44,7 @@ function Screens() {
       <Shell>
         <Routes>
           <Route path="/" element={<CarerHome />} />
+          <Route path="/team" element={<CareTeam />} />
           <Route path="/link" element={<LinkPerson />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/" replace />} />

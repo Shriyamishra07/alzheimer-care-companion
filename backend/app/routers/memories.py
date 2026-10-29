@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..db import SessionLocal, get_db
+from ..domain.privacy import strip_jpeg_metadata
 from ..domain.text import content_tokens
 from ..models import Media, Person, Place, Record, RecordPerson, User
 from ..providers.llm import ProviderError, get_provider
@@ -22,7 +23,10 @@ ALLOWED_MEDIA = ("image/", "audio/")
 
 
 def _enrich(record_id: int):
-    """After saving: transcribe voice notes and describe photos, when a model is configured."""
+    """After saving: transcribe voice notes and describe photos, when a model is configured.
+
+    Photos and voice cannot be redacted the way text can, so they are only sent to an external
+    model if the person has switched on "Let the AI describe my photos and voice notes"."""
     provider = get_provider()
     if provider.name == "offline":
         return
@@ -30,6 +34,9 @@ def _enrich(record_id: int):
     try:
         rec = db.get(Record, record_id)
         if not rec or not rec.media:
+            return
+        owner = db.get(User, rec.user_id)
+        if not owner or not owner.ai_media_consent:
             return
         try:
             if rec.kind == "voice" and not rec.transcript:
@@ -74,7 +81,9 @@ async def create_record(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
-    owner_id, is_owner = patient_scope(db, user, patient_id, "add_memory", "Added a memory")
+    owner_id, is_owner = patient_scope(db, user, patient_id, "add_memory", "Added a memory",
+                                       perm=None if user.role == "patient" else
+                                       ("messages" if kind == "message" else "add_memories"))
     if kind not in ("text", "photo", "voice", "message"):
         raise HTTPException(400, "Choose text, photo or voice.")
     if kind == "message":
@@ -92,6 +101,8 @@ async def create_record(
         data = await file.read()
         if len(data) > settings.MAX_UPLOAD_MB * 1024 * 1024:
             raise HTTPException(413, f"That file is larger than {settings.MAX_UPLOAD_MB:g} MB.")
+        if mime in ("image/jpeg", "image/jpg"):
+            data = strip_jpeg_metadata(data)   # removes EXIF, including the GPS position, before storing
     if not text.strip() and data is None:
         raise HTTPException(400, "Add a few words, a photo or a voice note.")
 
@@ -123,7 +134,7 @@ def list_records(
     user: User = Depends(current_user),
     db: Session = Depends(get_db),
 ):
-    owner_id, is_owner = patient_scope(db, user, patient_id, "view_memories", "Looked at memories")
+    owner_id, is_owner = patient_scope(db, user, patient_id, "view_memories", "Looked at memories", perm="memories")
     query = db.query(Record).filter(Record.user_id == owner_id, Record.deleted_at.is_(None))
     if not is_owner:
         query = query.filter(Record.is_private.is_(False))
@@ -209,7 +220,7 @@ def get_media(media_id: int, exp: int, sig: str, db: Session = Depends(get_db)):
 # ---------------------------------------------------------------- places
 @router.get("/places")
 def list_places(patient_id: int | None = None, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    owner_id, is_owner = patient_scope(db, user, patient_id, "view_places", "Looked at places")
+    owner_id, is_owner = patient_scope(db, user, patient_id, "view_places", "Looked at places", perm="places")
     counts = db.query(Record.place_id, func.count(Record.id)).filter(
         Record.user_id == owner_id, Record.deleted_at.is_(None), Record.place_id.isnot(None),
         *([] if is_owner else [Record.is_private.is_(False)])).group_by(Record.place_id).all()
@@ -275,7 +286,7 @@ class PersonIn(BaseModel):
 @router.get("/people")
 def list_people(patient_id: int | None = None, tz: int = 330, user: User = Depends(current_user),
                 db: Session = Depends(get_db)):
-    owner_id, is_owner = patient_scope(db, user, patient_id, "view_people", "Looked at people")
+    owner_id, is_owner = patient_scope(db, user, patient_id, "view_people", "Looked at people", perm="memories")
     people = db.query(Person).filter(Person.user_id == owner_id).order_by(Person.name).all()
     out = []
     for p in people:

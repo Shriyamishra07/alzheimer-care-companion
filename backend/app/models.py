@@ -5,12 +5,16 @@ Design decisions carried over from Review I:
   * QueryLog           -> the measurement instrument for NFR-AI-1..6, not a debug table
   * CareLink.revoked_at -> revocation leaves a trace; links are never deleted
   * Record.is_private  -> enforced on the server, excluded from caregivers and from AI retrieval
+Added after Review II:
+  * CareLink.role/permissions -> one primary caregiver manages the others and decides what each one sees
+  * Reminder kind/voice       -> medicine, activity and appointment reminders, spoken or in a family voice
+  * QueryLog.ai_payload       -> exactly what was sent to an external model, after redaction (audit)
 """
 from datetime import datetime
 
 from sqlalchemy import (JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, LargeBinary, String, Text,
                         UniqueConstraint)
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import deferred, relationship
 
 from .db import Base
 
@@ -28,6 +32,7 @@ class User(Base):
     role = Column(String(20), nullable=False)  # patient | caregiver
     phone = Column(String(30), default="")
     is_system = Column(Boolean, default=False)  # evaluation personas; hidden from normal login
+    ai_media_consent = Column(Boolean, default=False)  # may an external model describe photos / transcribe voice?
     created_at = Column(DateTime, default=utcnow)
 
 
@@ -102,6 +107,10 @@ class CareLink(Base):
     id = Column(Integer, primary_key=True)
     patient_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
     caregiver_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    role = Column(String(12), default="secondary", nullable=False)  # primary | secondary
+    permissions = Column(JSON, nullable=True)  # what a secondary caregiver may see; primary sees everything
+    relation = Column(String(60), default="")  # "daughter", "nephew", "home nurse"
+    invited_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=utcnow)
     revoked_at = Column(DateTime, nullable=True)
     patient = relationship("User", foreign_keys=[patient_id], lazy="joined")
@@ -112,6 +121,10 @@ class LinkCode(Base):
     __tablename__ = "link_codes"
     code = Column(String(8), primary_key=True)
     patient_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    issued_by = Column(Integer, ForeignKey("users.id"), nullable=True)  # the patient or the primary caregiver
+    link_role = Column(String(12), default="")  # role the new caregiver gets; "" = decide when used
+    permissions = Column(JSON, nullable=True)  # chosen by whoever made the invitation
+    label = Column(String(60), default="")  # who the invitation is for, e.g. "Rohan (nephew)"
     expires_at = Column(DateTime, nullable=False)
     used_at = Column(DateTime, nullable=True)
 
@@ -132,6 +145,7 @@ class QueryLog(Base):
     refusal_reason = Column(String(60), default="")
     latency_ms = Column(Integer, default=0)
     source = Column(String(20), default="app")  # app | eval
+    ai_payload = Column(JSON, nullable=True)  # what an external model received, already redacted; None = nothing sent
     created_at = Column(DateTime, default=utcnow, index=True)
 
 
@@ -152,6 +166,13 @@ class Reminder(Base):
     user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
     title = Column(String(160), nullable=False)
     time_hhmm = Column(String(5), nullable=False)  # local time, e.g. "08:00"
+    kind = Column(String(20), default="other")  # medication | activity | appointment | other
+    note = Column(String(300), default="")
+    repeat_mode = Column(String(10), default="daily")  # daily | once
+    on_date = Column(String(10), nullable=True)  # YYYY-MM-DD, for one-time reminders such as appointments
+    speak = Column(Boolean, default=True)  # read the reminder aloud when it is due
+    voice_data = deferred(Column(LargeBinary, nullable=True))  # a recorded voice message, e.g. from family
+    voice_mime = Column(String(80), default="")
     active = Column(Boolean, default=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime, default=utcnow)
